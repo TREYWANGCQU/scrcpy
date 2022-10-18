@@ -18,7 +18,6 @@ struct sc_screen_otg {
     SDL_Texture *texture;
 
     // See equivalent mechanism in screen.h
-    bool mouse_captured;
     SDL_Keycode mouse_capture_key_pressed;
 };
 
@@ -30,6 +29,8 @@ struct sc_screen_otg_params {
     bool always_on_top;
     int16_t window_x; // accepts SC_WINDOW_POSITION_UNDEFINED
     int16_t window_y; // accepts SC_WINDOW_POSITION_UNDEFINED
+    uint16_t window_width;
+    uint16_t window_height;
     bool window_borderless;
 };
 

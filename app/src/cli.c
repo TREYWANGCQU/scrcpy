@@ -54,6 +54,9 @@
 #define OPT_RAW_KEY_EVENTS         1034
 #define OPT_NO_DOWNSIZE_ON_ERROR   1035
 #define OPT_OTG                    1036
+#define OPT_NO_CLEANUP             1037
+#define OPT_PRINT_FPS              1038
+#define OPT_NO_POWER_ON            1039
 
 struct sc_option {
     char shortopt;
@@ -75,6 +78,11 @@ struct sc_shortcut {
 
 struct sc_envvar {
     const char *name;
+    const char *text;
+};
+
+struct sc_exit_status {
+    unsigned value;
     const char *text;
 };
 
@@ -116,7 +124,13 @@ static const struct sc_option options[] = {
         .text = "Crop the device screen on the server.\n"
                 "The values are expressed in the device natural orientation "
                 "(typically, portrait for a phone, landscape for a tablet). "
-                "Any --max-size value is cmoputed on the cropped size.",
+                "Any --max-size value is computed on the cropped size.",
+    },
+    {
+        .shortopt = 'd',
+        .longopt = "select-usb",
+        .text = "Use USB device (if there is exactly one, like adb -d).\n"
+                "Also see -e (--select-tcpip).",
     },
     {
         .longopt_id = OPT_DISABLE_SCREENSAVER,
@@ -140,6 +154,12 @@ static const struct sc_option options[] = {
         .text = "Add a buffering delay (in milliseconds) before displaying. "
                 "This increases latency to compensate for jitter.\n"
                 "Default is 0 (no buffering).",
+    },
+    {
+        .shortopt = 'e',
+        .longopt = "select-tcpip",
+        .text = "Use TCP/IP device (if there is exactly one, like adb -e).\n"
+                "Also see -d (--select-usb).",
     },
     {
         .longopt_id = OPT_ENCODER_NAME,
@@ -172,8 +192,7 @@ static const struct sc_option options[] = {
                 "It provides a better experience for IME users, and allows to "
                 "generate non-ASCII characters, contrary to the default "
                 "injection method.\n"
-                "It may only work over USB, and is currently only supported "
-                "on Linux.\n"
+                "It may only work over USB.\n"
                 "The keyboard layout must be configured (once and for all) on "
                 "the device, via Settings -> System -> Languages and input -> "
                 "Physical keyboard. This settings page can be started "
@@ -225,8 +244,7 @@ static const struct sc_option options[] = {
                 "device directly (relative mouse mode).\n"
                 "LAlt, LSuper or RSuper toggle the capture mode, to give "
                 "control of the mouse back to the computer.\n"
-                "It may only work over USB, and is currently only supported "
-                "on Linux.\n"
+                "It may only work over USB.\n"
                 "Also see --hid-keyboard.",
     },
     {
@@ -239,11 +257,12 @@ static const struct sc_option options[] = {
                 "Default is 0 (unlimited).",
     },
     {
-        .longopt_id = OPT_NO_DOWNSIZE_ON_ERROR,
-        .longopt = "no-downsize-on-error",
-        .text = "By default, on MediaCodec error, scrcpy automatically tries "
-                "again with a lower definition.\n"
-                "This option disables this behavior.",
+        .longopt_id = OPT_NO_CLEANUP,
+        .longopt = "no-cleanup",
+        .text = "By default, scrcpy removes the server binary from the device "
+                "and restores the device state (show touches, stay awake and "
+                "power mode) on exit.\n"
+                "This option disables this cleanup."
     },
     {
         .longopt_id = OPT_NO_CLIPBOARD_AUTOSYNC,
@@ -253,6 +272,13 @@ static const struct sc_option options[] = {
                 "and the device clipboard to the computer clipboard whenever "
                 "it changes.\n"
                 "This option disables this automatic synchronization."
+    },
+    {
+        .longopt_id = OPT_NO_DOWNSIZE_ON_ERROR,
+        .longopt = "no-downsize-on-error",
+        .text = "By default, on MediaCodec error, scrcpy automatically tries "
+                "again with a lower definition.\n"
+                "This option disables this behavior.",
     },
     {
         .shortopt = 'n',
@@ -278,6 +304,11 @@ static const struct sc_option options[] = {
                 "quality. This option disables the generation of mipmaps.",
     },
     {
+        .longopt_id = OPT_NO_POWER_ON,
+        .longopt = "no-power-on",
+        .text = "Do not power on the device on start.",
+    },
+    {
         .longopt_id = OPT_OTG,
         .longopt = "otg",
         .text = "Run in OTG mode: simulate physical keyboard and mouse, "
@@ -288,9 +319,8 @@ static const struct sc_option options[] = {
                 "LAlt, LSuper or RSuper toggle the mouse capture mode, to give "
                 "control of the mouse back to the computer.\n"
                 "If any of --hid-keyboard or --hid-mouse is set, only enable "
-                "keyboard or mouse respectively, otherwise enable both."
-                "It may only work over USB, and is currently only supported "
-                "on Linux.\n"
+                "keyboard or mouse respectively, otherwise enable both.\n"
+                "It may only work over USB.\n"
                 "See --hid-keyboard and --hid-mouse.",
     },
     {
@@ -309,11 +339,17 @@ static const struct sc_option options[] = {
     {
         .longopt_id = OPT_PREFER_TEXT,
         .longopt = "prefer-text",
-        .text = "Inject alpha characters and space as text events instead of"
+        .text = "Inject alpha characters and space as text events instead of "
                 "key events.\n"
                 "This avoids issues when combining multiple keys to enter a "
                 "special character, but breaks the expected behavior of alpha "
                 "keys in games (typically WASD).",
+    },
+    {
+        .longopt_id = OPT_PRINT_FPS,
+        .longopt = "print-fps",
+        .text = "Start FPS counter, to print framerate logs to the console. "
+                "It can be started or stopped at any time with MOD+i.",
     },
     {
         .longopt_id = OPT_PUSH_TARGET,
@@ -398,6 +434,20 @@ static const struct sc_option options[] = {
                 "It only shows physical touches (not clicks from scrcpy).",
     },
     {
+        .longopt_id = OPT_TCPIP,
+        .longopt = "tcpip",
+        .argdesc = "ip[:port]",
+        .optional_arg = true,
+        .text = "Configure and reconnect the device over TCP/IP.\n"
+                "If a destination address is provided, then scrcpy connects to "
+                "this address before starting. The device must listen on the "
+                "given TCP port (default is 5555).\n"
+                "If no destination address is provided, then scrcpy attempts "
+                "to find the IP address of the current device (typically "
+                "connected over USB), enables TCP/IP mode, then connects to "
+                "this address before starting.",
+    },
+    {
         .longopt_id = OPT_TUNNEL_HOST,
         .longopt = "tunnel-host",
         .argdesc = "ip",
@@ -457,20 +507,6 @@ static const struct sc_option options[] = {
         .longopt = "stay-awake",
         .text = "Keep the device on while scrcpy is running, when the device "
                 "is plugged in.",
-    },
-    {
-        .longopt_id = OPT_TCPIP,
-        .longopt = "tcpip",
-        .argdesc = "ip[:port]",
-        .optional_arg = true,
-        .text = "Configure and reconnect the device over TCP/IP.\n"
-                "If a destination address is provided, then scrcpy connects to "
-                "this address before starting. The device must listen on the "
-                "given TCP port (default is 5555).\n"
-                "If no destination address is provided, then scrcpy attempts "
-                "to find the IP address of the current device (typically "
-                "connected over USB), enables TCP/IP mode, then connects to "
-                "this address before starting.",
     },
     {
         .longopt_id = OPT_WINDOW_BORDERLESS,
@@ -547,7 +583,7 @@ static const struct sc_shortcut shortcuts[] = {
         .text = "Click on BACK",
     },
     {
-        .shortcuts = { "MOD+s" },
+        .shortcuts = { "MOD+s", "4th-click" },
         .text = "Click on APP_SWITCH",
     },
     {
@@ -583,7 +619,7 @@ static const struct sc_shortcut shortcuts[] = {
         .text = "Rotate device screen",
     },
     {
-        .shortcuts = { "MOD+n" },
+        .shortcuts = { "MOD+n", "5th-click" },
         .text = "Expand notification panel",
     },
     {
@@ -631,13 +667,33 @@ static const struct sc_envvar envvars[] = {
         .text = "Path to adb executable",
     },
     {
+        .name = "ANDROID_SERIAL",
+        .text = "Device serial to use if no selector (-s, -d, -e or "
+                "--tcpip=<addr>) is specified",
+    },
+    {
         .name = "SCRCPY_ICON_PATH",
         .text = "Path to the program icon",
     },
     {
         .name = "SCRCPY_SERVER_PATH",
         .text = "Path to the server binary",
-    }
+    },
+};
+
+static const struct sc_exit_status exit_statuses[] = {
+    {
+        .value = 0,
+        .text = "Normal program termination",
+    },
+    {
+        .value = 1,
+        .text = "Start failure",
+    },
+    {
+        .value = 2,
+        .text = "Device disconnected while running",
+    },
 };
 
 static char *
@@ -876,6 +932,25 @@ print_envvar(const struct sc_envvar *envvar, unsigned cols) {
     free(text);
 }
 
+static void
+print_exit_status(const struct sc_exit_status *status, unsigned cols) {
+    assert(cols > 8); // sc_str_wrap_lines() requires indent < columns
+    assert(status->text);
+
+    // The text starts at 9: 4 ident spaces, 3 chars for numeric value, 2 spaces
+    char *text = sc_str_wrap_lines(status->text, cols, 9);
+    if (!text) {
+        printf("<ERROR>\n");
+        return;
+    }
+
+    assert(strlen(text) >= 9); // Contains at least the initial identation
+
+    // text + 9 to remove the initial indentation
+    printf("    %3d  %s\n", status->value, text + 9);
+    free(text);
+}
+
 void
 scrcpy_print_usage(const char *arg0) {
 #define SC_TERM_COLS_DEFAULT 80
@@ -913,6 +988,11 @@ scrcpy_print_usage(const char *arg0) {
     printf("\nEnvironment variables:\n");
     for (size_t i = 0; i < ARRAY_LEN(envvars); ++i) {
         print_envvar(&envvars[i], cols);
+    }
+
+    printf("\nExit status:\n\n");
+    for (size_t i = 0; i < ARRAY_LEN(exit_statuses); ++i) {
+        print_exit_status(&exit_statuses[i], cols);
     }
 }
 
@@ -1320,6 +1400,12 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
                     return false;
                 }
                 break;
+            case 'd':
+                opts->select_usb = true;
+                break;
+            case 'e':
+                opts->select_tcpip = true;
+                break;
             case 'f':
                 opts->fullscreen = true;
                 break;
@@ -1339,8 +1425,7 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
                 opts->keyboard_input_mode = SC_KEYBOARD_INPUT_MODE_HID;
                 break;
 #else
-                LOGE("HID over AOA (-K/--hid-keyboard) is not supported on "
-                     "this platform. It is only available on Linux.");
+                LOGE("HID over AOA (-K/--hid-keyboard) is disabled.");
                 return false;
 #endif
             case OPT_MAX_FPS:
@@ -1358,8 +1443,7 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
                 opts->mouse_input_mode = SC_MOUSE_INPUT_MODE_HID;
                 break;
 #else
-                LOGE("HID over AOA (-M/--hid-mouse) is not supported on this"
-                     "platform. It is only available on Linux.");
+                LOGE("HID over AOA (-M/--hid-mouse) is disabled.");
                 return false;
 #endif
             case OPT_LOCK_VIDEO_ORIENTATION:
@@ -1517,13 +1601,21 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
             case OPT_NO_DOWNSIZE_ON_ERROR:
                 opts->downsize_on_error = false;
                 break;
+            case OPT_NO_CLEANUP:
+                opts->cleanup = false;
+                break;
+            case OPT_NO_POWER_ON:
+                opts->power_on = false;
+                break;
+            case OPT_PRINT_FPS:
+                opts->start_fps_counter = true;
+                break;
             case OPT_OTG:
 #ifdef HAVE_USB
                 opts->otg = true;
                 break;
 #else
-                LOGE("OTG mode (--otg) is not supported on this platform. It "
-                     "is only available on Linux.");
+                LOGE("OTG mode (--otg) is disabled.");
                 return false;
 #endif
             case OPT_V4L2_SINK:
@@ -1531,7 +1623,8 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
                 opts->v4l2_device = optarg;
                 break;
 #else
-                LOGE("V4L2 (--v4l2-sink) is only available on Linux.");
+                LOGE("V4L2 (--v4l2-sink) is disabled (or unsupported on this "
+                     "platform).");
                 return false;
 #endif
             case OPT_V4L2_BUFFER:
@@ -1559,8 +1652,16 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
     // If a TCP/IP address is provided, then tcpip must be enabled
     assert(opts->tcpip || !opts->tcpip_dst);
 
-    if (opts->serial && opts->tcpip_dst) {
-        LOGE("Incompatible options: -s/--serial and --tcpip with an argument");
+    unsigned selectors = !!opts->serial
+                       + !!opts->tcpip_dst
+                       + opts->select_tcpip
+                       + opts->select_usb;
+    if (selectors > 1) {
+        LOGE("At most one device selector option may be passed, among:\n"
+             "  --serial (-s)\n"
+             "  --select-usb (-d)\n"
+             "  --select-tcpip (-e)\n"
+             "  --tcpip=<addr> (with an argument)");
         return false;
     }
 
@@ -1637,6 +1738,18 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
     }
 
 #ifdef HAVE_USB
+
+# ifdef _WIN32
+    if (!opts->otg && (opts->keyboard_input_mode == SC_KEYBOARD_INPUT_MODE_HID
+                    || opts->mouse_input_mode == SC_MOUSE_INPUT_MODE_HID)) {
+        LOGE("On Windows, it is not possible to open a USB device already open "
+             "by another process (like adb).");
+        LOGE("Therefore, -K/--hid-keyboard and -M/--hid-mouse may only work in "
+             "OTG mode (--otg).");
+        return false;
+    }
+# endif
+
     if (opts->otg) {
         // OTG mode is compatible with only very few options.
         // Only report obvious errors.
@@ -1664,12 +1777,12 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
             LOGE("OTG mode: could not select display");
             return false;
         }
-#ifdef HAVE_V4L2
+# ifdef HAVE_V4L2
         if (opts->v4l2_device) {
             LOGE("OTG mode: could not sink to V4L2 device");
             return false;
         }
-#endif
+# endif
     }
 #endif
 

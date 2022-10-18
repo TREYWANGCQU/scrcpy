@@ -1,5 +1,5 @@
-#ifndef COMPAT_H
-#define COMPAT_H
+#ifndef SC_COMPAT_H
+#define SC_COMPAT_H
 
 #include "config.h"
 
@@ -8,8 +8,10 @@
 
 #ifndef __WIN32
 # define PRIu64_ PRIu64
+# define SC_PRIsizet "zu"
 #else
 # define PRIu64_ "I64u"  // Windows...
+# define SC_PRIsizet "Iu"
 #endif
 
 // In ffmpeg/doc/APIchanges:

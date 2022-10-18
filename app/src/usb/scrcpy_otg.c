@@ -2,6 +2,7 @@
 
 #include <SDL2/SDL.h>
 
+#include "adb/adb.h"
 #include "events.h"
 #include "screen_otg.h"
 #include "util/log.h"
@@ -28,35 +29,39 @@ sc_usb_on_disconnected(struct sc_usb *usb, void *userdata) {
     }
 }
 
-static bool
+static enum scrcpy_exit_code
 event_loop(struct scrcpy_otg *s) {
     SDL_Event event;
     while (SDL_WaitEvent(&event)) {
         switch (event.type) {
             case EVENT_USB_DEVICE_DISCONNECTED:
                 LOGW("Device disconnected");
-                return false;
+                return SCRCPY_EXIT_DISCONNECTED;
             case SDL_QUIT:
                 LOGD("User requested to quit");
-                return true;
+                return SCRCPY_EXIT_SUCCESS;
             default:
                 sc_screen_otg_handle_event(&s->screen_otg, &event);
                 break;
         }
     }
-    return false;
+    return SCRCPY_EXIT_FAILURE;
 }
 
-bool
+enum scrcpy_exit_code
 scrcpy_otg(struct scrcpy_options *options) {
     static struct scrcpy_otg scrcpy_otg;
     struct scrcpy_otg *s = &scrcpy_otg;
 
     const char *serial = options->serial;
 
+    if (!SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1")) {
+        LOGW("Could not enable linear filtering");
+    }
+
     // Minimal SDL initialization
     if (SDL_Init(SDL_INIT_EVENTS)) {
-        LOGC("Could not initialize SDL: %s", SDL_GetError());
+        LOGE("Could not initialize SDL: %s", SDL_GetError());
         return false;
     }
 
@@ -66,7 +71,7 @@ scrcpy_otg(struct scrcpy_options *options) {
         LOGW("Could not enable mouse focus clickthrough");
     }
 
-    bool ret = false;
+    enum scrcpy_exit_code ret = SCRCPY_EXIT_FAILURE;
 
     struct sc_hid_keyboard *keyboard = NULL;
     struct sc_hid_mouse *mouse = NULL;
@@ -75,58 +80,36 @@ scrcpy_otg(struct scrcpy_options *options) {
     bool aoa_started = false;
     bool aoa_initialized = false;
 
+#ifdef _WIN32
+    // On Windows, only one process could open a USB device
+    // <https://github.com/Genymobile/scrcpy/issues/2773>
+    LOGI("Killing adb daemon (if any)...");
+    unsigned flags = SC_ADB_NO_STDOUT | SC_ADB_NO_STDERR | SC_ADB_NO_LOGERR;
+    // uninterruptible (intr == NULL), but in practice it's very quick
+    sc_adb_kill_server(NULL, flags);
+#endif
+
     static const struct sc_usb_callbacks cbs = {
         .on_disconnected = sc_usb_on_disconnected,
     };
     bool ok = sc_usb_init(&s->usb);
     if (!ok) {
-        return false;
+        return SCRCPY_EXIT_FAILURE;
     }
 
-    struct sc_usb_device usb_devices[16];
-    ssize_t count = sc_usb_find_devices(&s->usb, serial, usb_devices,
-                                        ARRAY_LEN(usb_devices));
-    if (count < 0) {
-        LOGE("Could not list USB devices");
+    struct sc_usb_device usb_device;
+    ok = sc_usb_select_device(&s->usb, serial, &usb_device);
+    if (!ok) {
         goto end;
     }
 
-    if (count == 0) {
-        if (serial) {
-            LOGE("Could not find USB device %s", serial);
-        } else {
-            LOGE("Could not find any USB device");
-        }
-        goto end;
-    }
-
-    if (count > 1) {
-        if (serial) {
-            LOGE("Multiple (%d) USB devices with serial %s:", (int) count,
-                 serial);
-        } else {
-            LOGE("Multiple (%d) USB devices:", (int) count);
-        }
-        for (size_t i = 0; i < (size_t) count; ++i) {
-            struct sc_usb_device *d = &usb_devices[i];
-            LOGE("    %-18s (%04" PRIx16 ":%04" PRIx16 ")  %s %s",
-                 d->serial, d->vid, d->pid, d->manufacturer, d->product);
-        }
-        if (!serial) {
-            LOGE("Specify the device via -s or --serial");
-        }
-        sc_usb_device_destroy_all(usb_devices, count);
-        goto end;
-    }
     usb_device_initialized = true;
 
-    struct sc_usb_device *usb_device = &usb_devices[0];
+    LOGI("USB device: %s (%04x:%04x) %s %s", usb_device.serial,
+         (unsigned) usb_device.vid, (unsigned) usb_device.pid,
+         usb_device.manufacturer, usb_device.product);
 
-    LOGI("USB device: %s (%04" PRIx16 ":%04" PRIx16 ") %s %s",
-         usb_device->serial, usb_device->vid, usb_device->pid,
-         usb_device->manufacturer, usb_device->product);
-
-    ok = sc_usb_connect(&s->usb, usb_device->device, &cbs, NULL);
+    ok = sc_usb_connect(&s->usb, usb_device.device, &cbs, NULL);
     if (!ok) {
         goto end;
     }
@@ -173,7 +156,7 @@ scrcpy_otg(struct scrcpy_options *options) {
 
     const char *window_title = options->window_title;
     if (!window_title) {
-        window_title = usb_device->product ? usb_device->product : "scrcpy";
+        window_title = usb_device.product ? usb_device.product : "scrcpy";
     }
 
     struct sc_screen_otg_params params = {
@@ -183,6 +166,8 @@ scrcpy_otg(struct scrcpy_options *options) {
         .always_on_top = options->always_on_top,
         .window_x = options->window_x,
         .window_y = options->window_y,
+        .window_width = options->window_width,
+        .window_height = options->window_height,
         .window_borderless = options->window_borderless,
     };
 
@@ -192,7 +177,7 @@ scrcpy_otg(struct scrcpy_options *options) {
     }
 
     // usb_device not needed anymore
-    sc_usb_device_destroy(usb_device);
+    sc_usb_device_destroy(&usb_device);
     usb_device_initialized = false;
 
     ret = event_loop(s);
@@ -223,7 +208,7 @@ end:
     }
 
     if (usb_device_initialized) {
-        sc_usb_device_destroy(usb_device);
+        sc_usb_device_destroy(&usb_device);
     }
 
     sc_usb_destroy(&s->usb);
