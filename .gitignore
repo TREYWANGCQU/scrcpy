@@ -8,3 +8,5 @@ build/
 /x/
 /scrcpy-server
 local.properties
+scrcpy
+.vscode/
