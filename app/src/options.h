@@ -135,6 +135,11 @@ struct scrcpy_options {
     bool downsize_on_error;
     bool tcpip;
     const char *tcpip_dst;
+    bool select_usb;
+    bool select_tcpip;
+    bool cleanup;
+    bool start_fps_counter;
+    bool power_on;
 };
 
 extern const struct scrcpy_options scrcpy_options_default;
