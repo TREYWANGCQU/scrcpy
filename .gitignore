@@ -6,7 +6,8 @@ build/
 .idea/
 .gradle/
 /x/
-/scrcpy-server
+scrcpy-server
 local.properties
 scrcpy
 .vscode/
+
