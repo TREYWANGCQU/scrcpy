@@ -12,7 +12,7 @@ PREBUILT_SERVER_SHA256=ae74a81ea79c0dc7250e586627c278c0a9a8c5de46c9fb5c38c167fb1
 
 rm scrcpy-server
 echo "[scrcpy] Downloading prebuilt server..."
-wget -e "https_proxy=172.18.80.1:10809"  "$PREBUILT_SERVER_URL" -O scrcpy-server
+wget -e "https_proxy=192.168.131.110:10809"  "$PREBUILT_SERVER_URL" -O scrcpy-server
 echo "[scrcpy] Verifying prebuilt server..."
 echo "$PREBUILT_SERVER_SHA256  scrcpy-server" | sha256sum --check
 
