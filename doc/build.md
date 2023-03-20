@@ -2,57 +2,16 @@
 
 Here are the instructions to build _scrcpy_ (client and server).
 
-
-## Simple
-
-If you just want to install the latest release from `master`, follow this
-simplified process.
-
-First, you need to install the required packages:
-
-```bash
-# for Debian/Ubuntu
-sudo apt install ffmpeg libsdl2-2.0-0 adb wget \
-                 gcc git pkg-config meson ninja-build libsdl2-dev \
-                 libavcodec-dev libavdevice-dev libavformat-dev libavutil-dev \
-                 libusb-1.0-0 libusb-1.0-0-dev
-```
-
-Then clone the repo and execute the installation script
-([source](install_release.sh)):
-
-```bash
-git clone https://github.com/Genymobile/scrcpy
-cd scrcpy
-./install_release.sh
-```
-
-When a new release is out, update the repo and reinstall:
-
-```bash
-git pull
-./install_release.sh
-```
-
-To uninstall:
-
-```bash
-sudo ninja -Cbuild-auto uninstall
-```
-
+If you just want to build and install the latest release, follow the simplified
+process described in [doc/linux.md](linux.md).
 
 ## Branches
 
-### `master`
-
-The `master` branch concerns the latest release, and is the home page of the
-project on GitHub.
-
-
-### `dev`
-
-`dev` is the current development branch. Every commit present in `dev` will be
-in the next release.
+There are two main branches:
+ - `master`: contains the latest release. It is the home page of the project on
+   GitHub.
+ - `dev`: the current development branch. Every commit present in `dev` will be
+   in the next release.
 
 If you want to contribute code, please base your commits on the latest `dev`
 branch.
@@ -68,6 +27,8 @@ the following files to a directory accessible from your `PATH`:
  - `adb.exe`
  - `AdbWinApi.dll`
  - `AdbWinUsbApi.dll`
+
+It is also available in scrcpy releases.
 
 The client requires [FFmpeg] and [LibSDL2]. Just follow the instructions.
 
@@ -94,7 +55,7 @@ sudo apt install ffmpeg libsdl2-2.0-0 adb libusb-1.0-0
 # client build dependencies
 sudo apt install gcc git pkg-config meson ninja-build libsdl2-dev \
                  libavcodec-dev libavdevice-dev libavformat-dev libavutil-dev \
-                 libusb-1.0-0-dev
+                 libswresample-dev libusb-1.0-0-dev
 
 # server build dependencies
 sudo apt install openjdk-11-jdk
@@ -260,7 +221,7 @@ set ANDROID_SDK_ROOT=%LOCALAPPDATA%\Android\sdk
 Then, build:
 
 ```bash
-meson x --buildtype=release --strip -Db_lto=true
+meson setup x --buildtype=release --strip -Db_lto=true
 ninja -Cx  # DO NOT RUN AS ROOT
 ```
 
@@ -272,16 +233,16 @@ install` must be run as root)._
 
 #### Option 2: Use prebuilt server
 
- - [`scrcpy-server-v1.24`][direct-scrcpy-server]  
-   <sub>SHA-256: `ae74a81ea79c0dc7250e586627c278c0a9a8c5de46c9fb5c38c167fb1a36f056`</sub>
+ - [`scrcpy-server-v2.0`][direct-scrcpy-server]  
+   <sub>SHA-256: `9e241615f578cd690bb43311000debdecf6a9c50a7082b001952f18f6f21ddc2`</sub>
 
-[direct-scrcpy-server]: https://github.com/Genymobile/scrcpy/releases/download/v1.24/scrcpy-server-v1.24
+[direct-scrcpy-server]: https://github.com/Genymobile/scrcpy/releases/download/v2.0/scrcpy-server-v2.0
 
 Download the prebuilt server somewhere, and specify its path during the Meson
 configuration:
 
 ```bash
-meson x --buildtype=release --strip -Db_lto=true \
+meson setup x --buildtype=release --strip -Db_lto=true \
     -Dprebuilt_server=/path/to/scrcpy-server
 ninja -Cx  # DO NOT RUN AS ROOT
 ```
@@ -314,7 +275,8 @@ This installs several files:
  - `/usr/local/share/zsh/site-functions/_scrcpy` (zsh completion)
  - `/usr/local/share/bash-completion/completions/scrcpy` (bash completion)
 
-You can then [run](README.md#run) `scrcpy`.
+You can then run `scrcpy`.
+
 
 ### Uninstall
 
